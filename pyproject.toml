@@ -1,0 +1,16 @@
+[project]
+name = "flash"
+version = "0.1.0"
+description = "Floating-point FlashAttention kernel in Triton (baseline for QFlash)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.7.1",
+]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["flash*"]
