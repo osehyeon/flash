@@ -3,7 +3,7 @@ import argparse
 import torch
 import torch.nn.functional as F
 
-from flash import flash
+import flash as _flash
 
 # (name, Z, H, N, D) -- per-sample shapes (Z is #windows for Swin)
 WORKLOADS = [
@@ -16,33 +16,36 @@ WORKLOADS = [
     ('A7 Swin-4',  1,  24,  49, 32),
 ]
 BATCH_SIZES = [1, 8]
+KERNELS = {'flash': _flash.flash, 'qkflash': _flash.qkflash, 'qkv_flash': _flash.qkv_flash}
 
 
 def main():
-    p = argparse.ArgumentParser(description="Floating-point FlashAttention baseline")
+    p = argparse.ArgumentParser(description="FlashAttention kernel benchmark")
+    p.add_argument('--kernel', choices=list(KERNELS), default='flash')
     p.add_argument('--dtype', choices=['tf32', 'fp16', 'bf16'], default='fp16')
     args = p.parse_args()
+    kernel = KERNELS[args.kernel]
 
     torch.manual_seed(199)
-    print(f"dtype = {args.dtype}")
+    print(f"kernel = {args.kernel}, dtype = {args.dtype}")
     print(f"{'workload':<11} {'SQNR (dB)':>10}", end='')
     for b in BATCH_SIZES:
         print(f"  {f'b={b} (ms)':>10}", end='')
     print()
 
     for name, Z, H, N, D in WORKLOADS:
-        # fp32 inputs -> fp32 reference. flash() casts to target dtype internally.
+        # fp32 inputs -> fp32 reference. kernel casts to target dtype internally.
         qkv = torch.rand(3, Z, H, N, D, device='cuda', dtype=torch.float32) * 8 - 4
         q, k, v = qkv[0], qkv[1], qkv[2]
-        out = flash.forward(q, k, v, dtype=args.dtype)
+        out = kernel.forward(q, k, v, dtype=args.dtype)
         ref = F.scaled_dot_product_attention(q, k, v)
         sqnr = 20 * torch.log10(torch.norm(ref) / torch.norm(out.float() - ref))
         print(f"{name:<11} {sqnr.item():>10.2f}", end='')
 
         for b in BATCH_SIZES:
             qkv_b = torch.rand(3, Z * b, H, N, D, device='cuda', dtype=torch.float32) * 8 - 4
-            ms = flash.forward(qkv_b[0], qkv_b[1], qkv_b[2],
-                               dtype=args.dtype, return_mode='latency')
+            ms = kernel.forward(qkv_b[0], qkv_b[1], qkv_b[2],
+                                dtype=args.dtype, return_mode='latency')
             print(f"  {ms:>10.4f}", end='')
         print()
 
